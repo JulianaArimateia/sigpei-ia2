@@ -1,0 +1,25 @@
+# Ambiente virtual
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Variáveis de ambiente (contém chaves de API)
+.env
+.env.local
+
+# Banco de dados local
+sigpei.db
+
+# Claude Code
+.claude/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# uv
+.python-version

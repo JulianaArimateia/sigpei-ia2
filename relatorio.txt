@@ -1,0 +1,369 @@
+================================================================================
+SIGPEI-IA — RELATORIO DE SUBSTITUICAO DO OLLAMA POR IA EM NUVEM GRATUITA
+Data: 07/08/2026
+================================================================================
+
+1. OBJETIVO
+--------------------------------------------------------------------------------
+Substituir o Ollama (IA local, usada apenas pela interface web/Streamlit) por
+alternativas gratuitas de IA em nuvem, mantendo (ou melhorando) a qualidade de
+extracao de campos do PEI, a facilidade de instalacao para professores e a
+protecao de dados sensiveis dos estudantes (diagnostico, deficiencia, CID-10 —
+"dados sensiveis" nos termos do Art. 5, II, da LGPD).
+
+O app mobile/API ja usava um provedor remoto gratuito (OpenRouter) desde a
+ultima entrega; o unico ponto que ainda dependia de instalacao local era a
+interface web (Streamlit), que chamava o Ollama em http://localhost:11434.
+
+
+2. PONTO CRITICO IDENTIFICADO ANTES DE COMECAR
+--------------------------------------------------------------------------------
+Ao ler todos os arquivos do projeto, o arquivo artigo/texto_artigo.md (rascunho
+do artigo academico sobre o SIGPEI-IA) contem o seguinte trecho, escrito para
+justificar a escolha do Ollama local:
+
+    "A inferencia e realizada localmente pelo Ollama com o modelo Gemma 2 2b,
+    garantindo que dados sensiveis dos estudantes nao sejam transmitidos a
+    servidores externos, em conformidade com a LGPD."
+
+Ou seja: a decisao de usar IA local nao era so tecnica, era um argumento do
+proprio artigo. Trocar por nuvem sem cuidado quebraria essa afirmacao e exigiria
+reescrever esse paragrafo. Por isso, antes de qualquer mudanca de codigo, essa
+questao foi levada ao usuario (Juliana), que escolheu explicitamente a opcao:
+
+    "So nuvem, mas priorizando o provedor com melhor postura de privacidade"
+    (dado sensivel de aluno > velocidade > tamanho do free tier)
+
+Esse relatorio e o codigo foram construidos em torno dessa decisao.
+ACAO PENDENTE PARA O USUARIO: o paragrafo acima em artigo/texto_artigo.md
+precisa ser reescrito para descrever a nova arquitetura (ver secao 8).
+
+
+3. ALTERNATIVAS PESQUISADAS E COMPARADAS
+--------------------------------------------------------------------------------
+Foram pesquisadas 8 alternativas gratuitas/de baixo custo. Critério de
+comparação, em ordem de peso (conforme decisão do usuário): (1) a empresa usa
+os dados enviados para TREINAR modelos? (2) precisa de cartão de crédito? (3)
+velocidade/qualidade; (4) limite do free tier; (5) facilidade de integração
+com o código já existente (cliente OpenAI já usado no projeto).
+
+--------------------------------------------------------------------------------
+TABELA 1 — COMPARACAO GERAL
+--------------------------------------------------------------------------------
+| Provedor      | Treina com seus dados?         | Cartao? | Free tier         | API compativel com OpenAI? |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| Groq          | NUNCA, em nenhum plano. ZDR     | Nao     | 30 req/min, sem   | Sim (endpoint nativo         |
+|               | (Zero Data Retention) opcional  |         | limite mensal de  | /openai/v1)                  |
+|               | self-service.                   |         | uso, so de taxa   |                               |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| Mistral       | Plano pago: NAO treina. Plano   | Nao     | ~1 bi tokens/mes, | Sim (endpoint nativo,        |
+| (La Plateforme)| gratuito "Experiment": TREINA  |         | 2 req/min         | schema OpenAI)               |
+|               | por padrao (precisa desativar  |         |                   |                               |
+|               | manualmente em Privacy Settings)|         |                   |                               |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| OpenRouter    | Depende do modelo por tras.     | Nao     | Varia por modelo  | Sim (e o proprio             |
+|               | Varios modelos ":free" exigem   |         | ":free"; ha       | agregador OpenAI-like)       |
+|               | "permitir treinamento" para     |         | rodizio de varios |                               |
+|               | liberar acesso.                 |         | modelos gratuitos |                               |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| Google Gemini | SIM, por padrao. ToS do free    | Nao     | Generoso (Gemini  | Sim (endpoint de             |
+| (AI Studio,   | tier: "Google usa o conteudo    |         | 2.x Flash)        | compatibilidade OpenAI)      |
+| free tier)    | enviado para melhorar produtos",|         |                   |                               |
+|               | inclusive revisao humana.       |         |                   |                               |
+|               | So para de treinar na versao    |         |                   |                               |
+|               | PAGA (billing ativado).         |         |                   |                               |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| Cohere        | Termos padrao de Trial Key      | Nao     | ~1000 chamadas/mes| Nao nativamente (schema      |
+| (Trial Key)   | (nao garante "no training" como|         | uso NAO comercial | proprio, precisaria de       |
+|               | no plano empresarial opt-out)   |         |                   | SDK/wrapper adicional)       |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| Anthropic     | NUNCA treina com dados de API   | Sim     | NAO HA free tier   | Nao (schema proprio,         |
+| Claude        | por padrao (melhor postura do   | (so     | permanente, so    | precisa do SDK "anthropic")  |
+|               | mercado em compliance/SOC2)     | credito | credito de teste  |                               |
+|               |                                  | inicial)| inicial            |                               |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| Cloudflare    | NUNCA treina modelos com dados  | Nao     | 10.000 "Neurons"/ | Nao nativamente (schema      |
+| Workers AI    | de clientes (documentado)       |         | dia, compartilhado| REST proprio da Cloudflare;  |
+|               |                                  |         | entre modelos      | precisa de conta + Worker)   |
+|---------------|---------------------------------|---------|-------------------|------------------------------|
+| Ollama local  | Nao aplicavel (nada sai da      | Nao     | Ilimitado (limitado| Sim (ja era usado assim)     |
+| (situacao     | maquina) — a favor da LGPD, mas |         | pela CPU/RAM da    |                               |
+| anterior)     | exige instalar/baixar modelo    |         | maquina)           |                               |
+|               | em cada computador da escola     |         |                    |                               |
+
+Fontes consultadas (pesquisa web, agosto/2026): documentacao oficial de
+privacidade/termos de uso de cada provedor (Groq Services Agreement e "Your
+Data in GroqCloud"; Mistral "Does Mistral AI exploit users data to train its
+models" + Privacy Policy de La Plateforme; termos do Gemini API / Google AI
+Studio; documentacao de privacidade do OpenRouter "Provider Logging"; FAQ e
+pricing do Cohere; Cloudflare "Your Data and Workers AI"). Politicas de IA
+mudam com frequencia — antes de usar em produção com dados reais de alunos,
+revisite o link do provedor escolhido.
+
+
+4. DECISAO FINAL E ARQUITETURA IMPLEMENTADA
+--------------------------------------------------------------------------------
+Cadeia de 3 provedores com fallback automatico, todos acessados pelo MESMO
+cliente Python (biblioteca "openai", so mudando a "base_url" e a chave — nenhum
+SDK novo foi necessario). Ordem de prioridade = melhor postura de privacidade
+primeiro, dentro do que é realisticamente gratuito:
+
+    1o) GROQ         -> nunca treina com os dados, em nenhum plano.
+    2o) MISTRAL      -> so treina no free tier se o usuario nao desativar.
+    3o) OPENROUTER   -> variavel por modelo; usado so como ultimo recurso.
+
+Se a chave do 1o provedor nao estiver configurada, ou a chamada falhar
+(limite excedido, erro 5xx, etc.), o sistema tenta o proximo automaticamente,
+sem qualquer intervencao do usuario final (professor). Isso é MAIS resiliente
+do que a situacao anterior, em que o unico "provedor" da interface web era o
+Ollama: se o Ollama nao estivesse rodando, a aplicacao simplesmente falhava.
+
+Por que nao entrou no codigo:
+  - Google Gemini free tier: politica de dados incompativel com a prioridade
+    de privacidade definida pelo usuario (Google pode usar os dados para
+    treinar e ha revisao humana no free tier). Só recomendável com billing
+    ativado (deixa de ser gratuito de forma incondicional).
+  - Cohere / Anthropic / Cloudflare Workers AI: exigiriam SDK proprio (Cohere,
+    Anthropic) ou uma conta/infra adicional fora do escopo de uma chave de API
+    simples (Cloudflare Workers AI roda dentro de um "Worker", nao é so uma
+    chamada REST direta como as demais). Ficam registrados aqui como
+    candidatos futuros, principalmente o Cloudflare Workers AI, que tem a
+    MESMA garantia de "nunca treina" do Groq e ainda tem free tier sem cartao
+    — vale a pena integrar se for necessario mais um nivel de fallback.
+
+
+5. MUDANCAS FEITAS NO CODIGO (arquivo por arquivo)
+--------------------------------------------------------------------------------
+ai_processor.py
+  - Removido o cliente local do Ollama (`http://localhost:11434/v1`) e o
+    parametro `local: bool` de `extract_pei_info()` e `improve_transcription()`.
+  - Criada a lista `_PROVIDERS` (Groq, Mistral, OpenRouter) com fallback
+    automatico dentro de `_call()`: tenta cada modelo de cada provedor
+    configurado, em ordem, tratando erro 401 (chave invalida) como "pula para
+    o proximo provedor" e erro 429/rate-limit como "espera e tenta de novo".
+
+app2.0.py (interface Streamlit)
+  - Removida a checagem de status do Ollama na barra lateral (fazia uma
+    requisicao HTTP a localhost:11434); substituida por uma checagem simples
+    de quais variaveis de ambiente de IA estao configuradas.
+  - Removidos os argumentos `local=True` das duas chamadas a `ai_processor`
+    (analise de texto e melhoria de transcricao de voz).
+  - Textos de interface atualizados (ex.: "Analisando com IA local..." virou
+    "Analisando com IA...", already sem depender de Ollama rodando).
+
+.env / .env.example
+  - Removida a variavel `OLLAMA_MODEL`.
+  - Adicionadas `GROQ_API_KEY` e `MISTRAL_API_KEY`, com comentarios explicando
+    a ordem de prioridade e o cuidado do opt-out de treinamento no Mistral.
+  - A chave OPENROUTER_API_KEY que ja existia no .env real foi mantida (ainda
+    funciona, agora como 3o nivel da cadeia, nao mais como unico provedor).
+
+pyproject.toml
+  - Removidas as dependencias "anthropic", "google-generativeai" e "groq"
+    (SDKs nativos que nunca chegaram a ser usados no codigo — o projeto so
+    precisa da biblioteca "openai", que já fala com Groq e Mistral via seus
+    endpoints compativeis com a API da OpenAI).
+  - `requires-python` mantido em ">=3.12" (estava divergente do README, que
+    pedia 3.14+; 3.12+ é o que o pyproject.toml já declarava).
+  - `uv sync` executado com sucesso apos a limpeza (72 pacotes resolvidos).
+
+README.md
+  - Secao "Como a IA funciona" reescrita, com a nova tabela de prioridade dos
+    3 provedores e o motivo de cada posicao.
+  - Removido o pre-requisito de instalar o Ollama.
+  - Passo a passo de instalacao simplificado (nao ha mais "baixar o modelo"
+    nem "ollama serve" antes de rodar o Streamlit).
+
+
+6. ARQUIVOS REMOVIDOS (e por que)
+--------------------------------------------------------------------------------
+requirements.txt
+  - Estava desatualizado em relacao ao pyproject.toml/uv.lock (faltavam
+    anthropic, groq, google-generativeai, httpx — que ja tinham sido
+    adicionados antes desta sessao) e o README so instrui `uv sync`, nunca
+    `pip install -r requirements.txt`. Era um arquivo morto, mantido apenas
+    por costume; removido para nao gerar confusao sobre qual arquivo é a
+    fonte de verdade das dependencias.
+
+NAO TOCADOS NESTA ETAPA (a troca do Ollama, por si só, não dependia deles)
+  - static/index.html e pei-mobile/src/*.js (api.js, config.js, screens/,
+    theme.js) já apareciam como deletados (git status "D") ANTES desta sessão
+    começar — mudanças em andamento de uma sessão anterior, sem relação com o
+    Ollama. Deixados de lado nesta etapa para não interferir em trabalho já
+    iniciado pelo usuário. (O restante desses dois itens — api.py e a pasta
+    pei-mobile/ inteira — foi removido depois, numa segunda rodada de limpeza
+    geral pedida explicitamente pela Juliana; ver seção 10.)
+  - sigpei.db: banco de dados local com dados reais, ignorado pelo Git
+    (.gitignore) — nunca deve ser removido/versionado.
+  - artigo/*: rascunho do artigo academico. O TEXTO nao foi editado por mim
+    (é conteudo autoral da Juliana), mas veja a recomendacao na secao 8.
+
+
+7. O QUE O USUARIO PRECISA FAZER AGORA (passo a passo)
+--------------------------------------------------------------------------------
+1. Criar conta gratuita na Groq (https://console.groq.com/keys) e gerar uma
+   API key. Colar em GROQ_API_KEY no .env. Este e o provedor principal.
+2. (Opcional, recomendado) Criar conta na Mistral (https://console.mistral.ai)
+   e gerar uma API key gratuita. ANTES de usar com dados reais de alunos,
+   entrar em console.mistral.ai -> Privacy/Settings e DESATIVAR a opcao de
+   uso dos dados para treinamento (o plano gratuito vem com isso ATIVADO por
+   padrao). Colar a chave em MISTRAL_API_KEY.
+3. A chave OPENROUTER_API_KEY que ja existia continua funcionando como
+   3o nivel de fallback; nenhuma acao necessaria, mas recomenda-se acessar
+   openrouter.ai -> Settings -> Privacy e desativar "Enable free endpoints
+   that may train on inputs" (isso pode reduzir a lista de modelos ":free"
+   disponiveis, mas aumenta a protecao dos dados).
+4. Rodar `uv sync` (ja executado nesta sessao, mas repetir se clonar o
+   projeto em outra maquina) e depois `uv run streamlit run app2.0.py`
+   normalmente — nao ha mais nenhum passo de instalar/baixar IA local.
+
+
+8. RECOMENDACAO PARA O ARTIGO (artigo/texto_artigo.md)
+--------------------------------------------------------------------------------
+O paragrafo do BLOCO 1 e BLOCO 2 que descreve a inferencia como "realizada
+localmente pelo Ollama... garantindo que dados sensiveis... nao sejam
+transmitidos a servidores externos" NAO reflete mais a implementacao atual e
+precisa ser reescrito antes da entrega do artigo. Sugestao de novo enfoque
+(a Juliana deve adaptar ao estilo do texto, isto é so um roteiro):
+
+  - Explicar que a inferencia passou a ser feita em nuvem, por uma cadeia de
+    provedores com fallback automatico (Groq -> Mistral -> OpenRouter),
+    escolhidos, entre outros criterios, pela politica de nao utilizacao dos
+    dados enviados para treinamento de modelos (contratualmente declarada
+    pelo provedor).
+  - Deixar explicito que essa é uma mitigacao de risco, nao uma eliminacao:
+    diferente do processamento 100% local, os dados TRAFEGAM (via HTTPS/TLS)
+    até servidores de terceiros fora do controle direto da instituicao. Isso
+    deve ser mencionado como limitacao do trabalho e trabalho futuro (ex.:
+    oferecer novamente um modo local opcional para instituicoes que exigem
+    residencia de dados, ou anonimizar/pseudonimizar o nome do aluno antes de
+    enviar ao LLM).
+  - A etapa de revisao humana obrigatoria antes de salvar (Human-in-the-Loop,
+    ja descrita no artigo) continua valendo e passa a ser tambem uma camada
+    adicional de controle sobre o que efetivamente é enviado/persistido.
+
+
+9. RISCOS RESIDUAIS E MITIGACOES JA POSSIVEIS
+--------------------------------------------------------------------------------
+- Politicas de privacidade mudam com o tempo (a pesquisa desta secao foi feita
+  em agosto/2026). Antes de qualquer uso em produção com dados reais de
+  estudantes, revisitar os links oficiais de cada provedor.
+- Nenhum provedor de nuvem oferece garantia juridica equivalente a "o dado
+  nunca saiu do computador". Para instituicoes com politica de dados mais
+  restritiva, a alternativa mais segura continua sendo IA local (Ollama ou
+  equivalente) — o codigo atual NAO IMPEDE reintroduzir isso como uma opcao
+  adicional na cadeia de `_PROVIDERS`, caso seja decidido no futuro.
+- Erros 401 de qualquer provedor sao tratados como "pular para o proximo
+  provedor" — isso e intencional para nao travar o professor no meio do
+  trabalho, mas significa que uma chave errada passa silenciosamente para o
+  fallback. Se quiser ser avisado quando uma chave especifica falhar,
+  adicionar um log/aviso é uma melhoria futura simples.
+
+
+10. LIMPEZA ADICIONAL DE ARQUIVOS NAO USADOS (segunda rodada, mesmo dia)
+--------------------------------------------------------------------------------
+Apos a troca do Ollama, foi feita uma revisao geral do projeto para apagar
+arquivos sem uso. Antes de apagar qualquer coisa consequente, cada achado foi
+confirmado com a Juliana. Resultado:
+
+main.py
+  - Stub padrao gerado pelo `uv init` ("Hello from sigpei-ia!"). Nunca foi
+    importado ou referenciado por nenhum outro arquivo. Apagado.
+
+api.py (FastAPI, 8 endpoints REST)
+  - Existia para servir 2 consumidores: a pasta static/ (frontend estatico) e
+    o app pei-mobile (React Native). Os dois já tinham sido apagados ANTES
+    desta sessão (git status mostrava "D" neles desde o inicio). Sem
+    static/, a linha `app.mount("/", StaticFiles(directory="static", ...))`
+    no final do arquivo quebra o processo ao iniciar o Uvicorn (a pasta nao
+    existe mais). Nenhum outro arquivo do projeto chama os endpoints
+    /api/analyze, /api/save etc. — nem o Streamlit, nem o mobile_app.py
+    (que importa ai_processor/database/pei_generator direto em Python, sem
+    HTTP). Ou seja, o arquivo já estava quebrado e sem consumidor. Apagado,
+    apos confirmacao.
+
+pei-mobile/ (pasta inteira — App.js, index.js, package.json, assets,
+node_modules, etc.)
+  - App.js importava './src/screens/NovoPEI', './src/screens/Registros',
+    './src/screens/Painel' e './src/theme' — todos ja apagados antes desta
+    sessao. Ou seja, o app React Native ja estava quebrado (import de
+    arquivos inexistentes) e nao rodaria mais com `npx expo start`.
+  - mobile_app.py (Flet, ja existente no projeto) tem exatamente as mesmas 3
+    telas (Novo PEI, Registros, Painel) com o mesmo fluxo em 3 passos, e usa
+    os mesmos modulos Python do resto do projeto — e o substituto natural.
+    Apagada a pasta inteira, apos confirmacao.
+
+README.md
+  - Removidas todas as secoes/instrucoes de API REST (Uvicorn, endpoints,
+    /docs) e de app mobile via React Native/Expo/Node.js.
+  - Adicionada secao "App Mobile (Flet)" explicando como rodar
+    `uv run python mobile_app.py`, e uma nota deixando explicito que
+    app2.0.py (web) e mobile_app.py (mobile) chamam os mesmos modulos Python
+    diretamente, sem API intermediaria.
+  - Tabela de "Tecnologias utilizadas" atualizada: removidas as linhas de
+    FastAPI e React Native/Expo; adicionada a linha de Flet como tecnologia
+    do app mobile.
+
+Nao apagados (verificados e mantidos de proposito):
+  - sigpei.db — dados reais, gitignored.
+  - artigo/ — conteudo autoral do artigo academico.
+  - .python-version, .claude/, .venv/, uv.lock — infraestrutura do projeto.
+
+
+11. INCIDENTE: MODELOS DESCONTINUADOS PELOS PROVEDORES (16/09/2026)
+--------------------------------------------------------------------------------
+Cerca de um mes depois da troca do Ollama, a analise por IA parou de funcionar
+com o erro "Todos os provedores de IA configurados falharam", ultimo erro:
+"This model is unavailable for free... use this slug instead:
+meta-llama/llama-3.2-3b-instruct" (HTTP 404 do OpenRouter).
+
+Investigacao (chamadas reais de teste, nao suposicao):
+  - Groq: os dois modelos configurados originalmente pararam de existir.
+    `llama-3.3-70b-versatile` retorna 404 "does not exist or you do not have
+    access to it"; `gemma2-9b-it` retorna 400 "has been decommissioned".
+  - OpenRouter: NENHUM dos 5 modelos gratuitos originais (Gemma 3, Mistral 7B,
+    Qwen3-8B, Llama 3.2 3B) ainda aparece na lista atual de modelos `:free`
+    da API (`GET https://openrouter.ai/api/v1/models`) — o catalogo gratuito
+    deles foi totalmente renovado desde a configuracao inicial.
+
+Isso confirma, na pratica, o aviso que ja constava na secao 9 deste relatorio:
+catalogos de modelo gratuito mudam com o tempo e o fallback entre provedores
+nao protege contra TODOS os modelos de TODOS os provedores ficarem
+desatualizados ao mesmo tempo, se configurados uma unica vez e esquecidos.
+
+Correcao aplicada em ai_processor.py (modelos re-testados com chamadas reais,
+incluindo verificacao de resposta em JSON valido, em 16/09/2026):
+  - Groq: `qwen/qwen3.8-27b` (principal — respondeu JSON limpo de primeira),
+    `openai/gpt-oss-120b` e `openai/gpt-oss-20b` (bons, mas sao modelos de
+    "raciocinio": consomem tokens ocultos de reasoning antes da resposta
+    visivel — funcionam bem com o max_tokens=4096 ja usado no projeto, mas
+    ficam vazios se o limite de tokens for baixo).
+  - OpenRouter: `google/gemma-4-26b-a4b-it:free` e
+    `nvidia/nemotron-3.5-lightning:free` (os unicos, entre ~8 candidatos
+    testados, que responderam sem erro 429/erro de parsing na hora do teste).
+  - Mistral: mantidos `mistral-small-latest` e `ministral-8b-latest` sem
+    alteracao — nao foram testados porque nenhuma chave MISTRAL_API_KEY
+    estava configurada ainda, mas o sufixo "-latest" e um alias que a Mistral
+    atualiza automaticamente, o que reduz (sem eliminar) o risco deste mesmo
+    problema acontecer de novo com esse provedor especificamente.
+
+Recomendacao permanente: isso VAI acontecer de novo, com qualquer provedor,
+em algum momento futuro — e da natureza de free tier de LLM. Se a analise
+comecar a falhar novamente com "Todos os provedores de IA configurados
+falharam", o primeiro passo e testar os modelos configurados com uma chamada
+real (nao confiar que o nome do modelo ainda existe), do jeito que foi feito
+aqui, antes de qualquer outra investigacao.
+
+
+12. RESUMO EXECUTIVO
+--------------------------------------------------------------------------------
+Ollama (IA local, so na interface web) foi substituido por uma cadeia de 3
+provedores gratuitos em nuvem (Groq, Mistral, OpenRouter), acessados pelo
+mesmo cliente OpenAI ja usado no projeto, priorizados por postura de
+privacidade em relacao a dados sensiveis de alunos, com fallback automatico
+entre eles. Tres SDKs nao usados (anthropic, groq, google-generativeai) e um
+arquivo de dependencias obsoleto (requirements.txt) foram removidos. A unica
+pendencia que fica com a Juliana e de conteudo, nao de codigo: atualizar o
+paragrafo do artigo academico que descrevia a justificativa de LGPD do Ollama
+local, conforme roteiro na secao 8.
+================================================================================

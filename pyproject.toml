@@ -1,0 +1,21 @@
+[project]
+name = "sigpei-ia"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "audio-recorder-streamlit>=0.0.10",
+    "flet>=0.84.0",
+    "httpx>=0.28.1",
+    "openai>=2.32.0",
+    "pandas>=3.0.2",
+    "pdfplumber>=0.11.9",
+    "pillow>=12.2.0",
+    "pytesseract>=0.3.13",
+    "python-docx>=1.2.0",
+    "python-dotenv>=1.2.2",
+    "reportlab>=4.4.10",
+    "speechrecognition>=3.16.1",
+    "streamlit>=1.56.0",
+]
