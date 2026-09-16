@@ -71,8 +71,8 @@ Web e mobile usam as mesmas dependências Python (`uv sync` resolve as duas).
 ### 1. Clone o repositório
 
 ```bash
-git clone https://github.com/JulianaArimateia/sigpei-ia.git
-cd sigpei-ia
+git clone https://github.com/JulianaArimateia/sigpei-ia2.git
+cd sigpei-ia2
 ```
 
 ### 2. Configure as variáveis de ambiente
